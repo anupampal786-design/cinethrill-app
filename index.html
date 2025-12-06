@@ -17,6 +17,16 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      /* Custom Scrollbar for the Slider */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+      }
+    </style>
   </head>
   <body class="bg-neutral-900 text-white">
     <div id="root"></div>
@@ -34,7 +44,7 @@
 
     <!-- THE FULL APP CODE -->
     <script type="text/babel" data-presets="react">
-      const { useState, useEffect } = React;
+      const { useState, useEffect, useRef } = React;
 
       // --- ICONS ---
       const IconBase = ({ children, className }) => (
@@ -64,6 +74,7 @@
       const API_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjYmYwOTE0NjJmMmQyNGE5NWNmNmNjN2JkZTFiZTAwZSIsIm5iZiI6MTc2NDk2OTQxMS4xNTUsInN1YiI6IjY5MzM0YmMzMzdmYzMyNmM2ZjQ4ZTM0NyIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.wSDP6eANdsXiz1fGJ5Iy9uVCLGg0-We23FxyVTi5drY";
       const BASE_URL = "https://api.themoviedb.org/3";
       const IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w1280";
+      const POSTER_THUMB_URL = "https://image.tmdb.org/t/p/w342";
 
       // TMDB Data
       const GENRES = { 'Thriller': 53, 'Crime': 80, 'Mystery': 9648, 'Drama': 18, 'Horror': 27, 'Action': 28, 'Adventure': 12, 'Science Fiction': 878, 'Comedy': 35 };
@@ -80,24 +91,26 @@
         const [installPrompt, setInstallPrompt] = useState(null);
         const [isInstalled, setIsInstalled] = useState(false);
         const [viewingWatchlist, setViewingWatchlist] = useState(false);
-        const [watchlistTab, setWatchlistTab] = useState('saved'); // 'saved' or 'watched'
+        const [watchlistTab, setWatchlistTab] = useState('saved'); 
         
         const [selectedLanguage, setSelectedLanguage] = useState('Bengali');
         const [selectedGenres, setSelectedGenres] = useState(['Thriller']);
         const [showFilters, setShowFilters] = useState(false);
+        const [recommendedMovies, setRecommendedMovies] = useState([]);
         
-        // WATCHLIST (Saved for later)
         const [watchlist, setWatchlist] = useState(() => {
           try { return JSON.parse(localStorage.getItem('myWatchlist')) || []; } catch (e) { return []; }
         });
 
-        // WATCHED LIST (Already seen history)
         const [watchedList, setWatchedList] = useState(() => {
           try { return JSON.parse(localStorage.getItem('myWatchedList')) || []; } catch (e) { return []; }
         });
 
-        // Auto-refresh when filters change
-        useEffect(() => { handleGenerate(); }, [selectedLanguage, selectedGenres]);
+        // Effect to refresh recommendations when filters change
+        useEffect(() => {
+          handleGenerate();
+          fetchRecommendations();
+        }, [selectedLanguage, selectedGenres]);
 
         useEffect(() => {
           window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); setInstallPrompt(e); });
@@ -165,35 +178,93 @@
           else { alert("Sorry, no trailer available for this movie!"); }
         };
 
-        const fetchMoviesFromTMDB = async (query = '') => {
-          try {
-            let url;
-            let baseUrl = `${BASE_URL}/discover/movie?sort_by=popularity.desc&include_adult=false`;
-            let filterParams = `&watch_region=IN`;
-            
+        const buildBaseUrl = () => {
+            let url = `${BASE_URL}/discover/movie?sort_by=popularity.desc&include_adult=false&watch_region=IN`;
             const genreIds = selectedGenres.map(g => GENRES[g]).join('|');
-            if (genreIds) filterParams += `&with_genres=${genreIds}`;
+            if (genreIds) url += `&with_genres=${genreIds}`;
             
             const langCode = LANGUAGES[selectedLanguage];
             if (langCode && langCode !== 'all') {
+              url += `&with_original_language=${langCode}`;
+              if (selectedLanguage === 'Bengali' || selectedLanguage === 'Hindi') url += `&vote_count.gte=2`; 
+              else if (selectedLanguage === 'English') url += `&vote_count.gte=50&primary_release_date.gte=2000-01-01`;
+            } else {
+               url += `&vote_count.gte=10`;
+            }
+            return url;
+        };
+
+        // --- FETCH 100 MOVIES FOR SLIDER (5 Pages) ---
+        const fetchRecommendations = async () => {
+            try {
+                const baseUrl = buildBaseUrl();
+                const pagePromises = [1, 2, 3, 4, 5].map(page => 
+                    fetch(`${baseUrl}&page=${page}`, { 
+                        headers: { Authorization: `Bearer ${API_TOKEN}` } 
+                    }).then(res => res.json())
+                );
+                
+                const responses = await Promise.all(pagePromises);
+                
+                const allMovies = responses.flatMap(data => data.results || []);
+                const uniqueMovies = Array.from(new Map(allMovies.map(m => [m.id, m])).values());
+                
+                setRecommendedMovies(uniqueMovies);
+            } catch (e) { console.error("Recs Error", e); }
+        };
+
+        // --- MAIN FETCH SINGLE MOVIE ---
+        const fetchMoviesFromTMDB = async (query = '') => {
+          try {
+            let url;
+            let baseUrl = `${BASE_URL}/discover/movie?include_adult=false`;
+            let filterParams = `&watch_region=IN`;
+            
+            // 1. GENRE FILTER
+            const genreIds = selectedGenres.map(g => GENRES[g]).join('|');
+            if (genreIds) filterParams += `&with_genres=${genreIds}`;
+            
+            // 2. LANGUAGE LOGIC
+            const langCode = LANGUAGES[selectedLanguage];
+            if (langCode && langCode !== 'all') {
               filterParams += `&with_original_language=${langCode}`;
-              if (selectedLanguage === 'Bengali' || selectedLanguage === 'Hindi') {
+              if (selectedLanguage === 'English') {
+                 // English movies: Skew towards modern (1990+) but allow classics occasionally
+                 filterParams += `&vote_count.gte=50&primary_release_date.gte=1990-01-01`;
+              } else {
+                 // Regional: Lower threshold to find more movies
                  filterParams += `&vote_count.gte=2`; 
-              } else if (selectedLanguage === 'English') {
-                 filterParams += `&vote_count.gte=50&primary_release_date.gte=2000-01-01`;
               }
             } else {
                filterParams += `&vote_count.gte=10`;
             }
 
             if (query.trim().length > 0) {
+              // --- SEARCH MODE ---
               url = `${BASE_URL}/search/movie?query=${encodeURIComponent(query)}&include_adult=false&page=1`;
             } else {
-              const scoutResponse = await fetch(`${baseUrl}${filterParams}&page=1`, { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${API_TOKEN}` } });
+              // --- DISCOVER MODE (HUGE COLLECTION LOGIC) ---
+              
+              // A. Randomize Sorting (Popularity vs Revenue vs Votes) to shuffle list order
+              const sortOptions = ['popularity.desc', 'popularity.desc', 'revenue.desc', 'vote_count.desc'];
+              const randomSort = sortOptions[Math.floor(Math.random() * sortOptions.length)];
+              
+              // B. Time Travel: Pick a random year to unlock "Deep Database"
+              // This gives access to ~500,000+ movies instead of just top 10,000
+              const currentYear = new Date().getFullYear();
+              const randomYear = Math.floor(Math.random() * (currentYear - 1970 + 1)) + 1970;
+              
+              // C. Scout the year to see how many pages exist
+              const scoutUrl = `${baseUrl}&sort_by=${randomSort}&primary_release_year=${randomYear}${filterParams}&page=1`;
+              
+              const scoutResponse = await fetch(scoutUrl, { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${API_TOKEN}` } });
               const scoutData = await scoutResponse.json();
-              const maxPages = Math.min(scoutData.total_pages || 1, 500);
+              
+              // D. Pick a random page from that year
+              const maxPages = Math.min(scoutData.total_pages || 1, 100); // Look at top 100 pages of that year
               const randomPage = Math.floor(Math.random() * maxPages) + 1;
-              url = `${baseUrl}${filterParams}&page=${randomPage}`;
+              
+              url = `${baseUrl}&sort_by=${randomSort}&primary_release_year=${randomYear}${filterParams}&page=${randomPage}`;
             }
 
             const options = { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${API_TOKEN}` } };
@@ -201,8 +272,10 @@
             let response = await fetch(url, options);
             let data = await response.json();
 
-            if ((!data.results || data.results.length === 0)) {
-               url = `${baseUrl}${filterParams}&page=1`;
+            // Fallback: If the random year/page failed, revert to generic popular
+            if (!data.results || data.results.length === 0) {
+               console.log("Deep dive empty, reverting to standard...");
+               url = `${baseUrl}&sort_by=popularity.desc${filterParams}&page=${Math.floor(Math.random()*20)+1}`;
                response = await fetch(url, options);
                data = await response.json();
             }
@@ -217,14 +290,20 @@
 
             const rawMovie = query.trim().length > 0 ? validResults[0] : validResults[Math.floor(Math.random() * validResults.length)];
             
+            return await processMovieData(rawMovie, options);
+
+          } catch (error) { return null; }
+        };
+
+        const processMovieData = async (rawMovie, options) => {
             const providerRes = await fetch(`${BASE_URL}/movie/${rawMovie.id}/watch/providers`, options);
             const providerData = await providerRes.json();
             const providers = providerData.results?.IN || providerData.results?.US;
             
-            // --- STRICT PLATFORM LOGIC ---
             let platformName = 'Check Online';
             let platformLink = `https://www.google.com/search?q=watch+${encodeURIComponent(rawMovie.title)}+movie`;
             
+            // --- STRICT PLATFORM LOGIC ---
             const TARGET_PLATFORMS = [
                 'Netflix', 'Amazon Prime Video', 'Disney+ Hotstar', 'Sony LIV', 'Zee5', 'JioCinema', 
                 'Hoichoi', 'MX Player', 'Voot', 'ALTBalaji', 'Apple TV Plus', 'Apple TV', 'Eros Now', 
@@ -232,7 +311,6 @@
             ];
 
             if (providers?.flatrate && providers.flatrate.length > 0) {
-              // Try to find one of our target platforms
               const foundProvider = providers.flatrate.find(p => 
                   TARGET_PLATFORMS.some(target => p.provider_name.toLowerCase().includes(target.toLowerCase()))
               );
@@ -259,7 +337,6 @@
                   else if (pLower.includes('lionsgate')) platformLink = `https://lionsgateplay.com/search?q=${encodedTitle}`;
                   else if (pLower.includes('klikk')) platformLink = `https://klikk.tv/search?q=${encodedTitle}`;
               } else {
-                  // If available on a platform NOT in our list, show first available but default to generic search link if needed
                   platformName = providers.flatrate[0].provider_name;
               }
             }
@@ -277,7 +354,15 @@
               platform: platformName,
               platformUrl: platformLink,
             };
-          } catch (error) { return null; }
+        };
+
+        const handleRecommendationClick = async (recMovie) => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            setIsAnimating(true);
+            const options = { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${API_TOKEN}` } };
+            const movie = await processMovieData(recMovie, options);
+            setCurrentMovie(movie);
+            setIsAnimating(false);
         };
 
         const handleGenerate = async (overrideQuery = null) => {
@@ -303,7 +388,7 @@
           if (!platform) return 'bg-gray-700 hover:bg-gray-600 text-white';
           const p = platform.toLowerCase();
           
-          // Custom Colors for Requested Platforms
+          // Updated Colors for Indian OTT
           if (p.includes('netflix')) return 'bg-red-600 hover:bg-red-700 text-white';
           if (p.includes('prime') || p.includes('amazon')) return 'bg-[#00A8E1] hover:bg-[#008dbd] text-white';
           if (p.includes('hotstar')) return 'bg-[#133063] hover:bg-[#1a4082] text-white';
@@ -387,7 +472,6 @@
                     <h1 className="text-3xl font-bold text-white">My Treasure Chest</h1>
                   </div>
                   
-                  {/* TABS */}
                   <div className="flex gap-4 border-b border-neutral-800 mb-6">
                     <button onClick={() => setWatchlistTab('saved')} className={`pb-3 text-sm font-bold transition-all border-b-2 ${watchlistTab === 'saved' ? 'border-red-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
                        Saved to Watch ({watchlist.length})
@@ -511,10 +595,31 @@
                     )}
                   </div>
                   {!searchQuery && (
-                    <div className="mt-12 flex justify-center">
+                    <div className="mt-12 flex flex-col items-center gap-8">
                       <button onClick={() => handleGenerate()} disabled={isAnimating} className={`group relative px-8 py-4 bg-white text-neutral-900 rounded-full font-bold text-xl shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)] hover:shadow-[0_0_60px_-10px_rgba(255,255,255,0.5)] transition-all transform hover:-translate-y-1 active:translate-y-0 overflow-hidden ${isAnimating ? 'opacity-80 cursor-wait' : ''}`}>
                         <span className="relative z-10 flex items-center gap-3">{isAnimating ? (<><RefreshCw className="w-6 h-6 animate-spin" />Scanning Database...</>) : (<>Generate New Movie<RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" /></>)}</span>
                       </button>
+
+                      {/* --- TOP PICKS SLIDER --- */}
+                      <div className="w-full max-w-6xl">
+                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2 px-2"><Star className="w-4 h-4 text-yellow-500 fill-current" /> Top Picks for You</h3>
+                        <div className="flex gap-4 overflow-x-auto pb-6 px-2 no-scrollbar snap-x">
+                            {recommendedMovies.length > 0 ? recommendedMovies.map(movie => (
+                                <div key={movie.id} onClick={() => handleRecommendationClick(movie)} className="snap-start shrink-0 w-32 cursor-pointer group">
+                                    <div className="w-32 h-48 rounded-lg overflow-hidden bg-neutral-800 border border-neutral-700 relative">
+                                        <img src={movie.poster_path ? `${POSTER_THUMB_URL}${movie.poster_path}` : ''} alt={movie.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                                        <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors" />
+                                    </div>
+                                    <p className="text-xs font-bold text-gray-300 mt-2 line-clamp-1 group-hover:text-white transition-colors">{movie.title}</p>
+                                    <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                                        <Star className="w-2.5 h-2.5 text-yellow-500 fill-current" /> {movie.vote_average.toFixed(1)}
+                                    </div>
+                                </div>
+                            )) : (
+                                <p className="text-sm text-gray-500 italic px-2">Loading recommendations...</p>
+                            )}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </>
