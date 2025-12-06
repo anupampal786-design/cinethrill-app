@@ -67,7 +67,8 @@
 
       // TMDB Data
       const GENRES = { 'Thriller': 53, 'Crime': 80, 'Mystery': 9648, 'Drama': 18, 'Horror': 27, 'Action': 28, 'Adventure': 12, 'Science Fiction': 878, 'Comedy': 35 };
-      const LANGUAGES = { 'Bengali': 'bn', 'Hindi': 'hi', 'English': 'en', 'Korean': 'ko', 'Spanish': 'es', 'All': 'all' };
+      // UPDATED LANGUAGES: Simplified to your 4 specific requests
+      const LANGUAGES = { 'Bengali': 'bn', 'Hindi': 'hi', 'English': 'en', 'International': 'all' };
 
       const MovieApp = () => {
         const [currentMovie, setCurrentMovie] = useState(null);
@@ -114,15 +115,12 @@
         };
 
         const markAsWatched = (movie) => {
-          // Add to watched list if not already there
           if (!watchedList.some(m => m.id === movie.id)) {
             setWatchedList([...watchedList, movie]);
           }
-          // Remove from "To Watch" list if it's there
           if (watchlist.some(m => m.id === movie.id)) {
             setWatchlist(watchlist.filter(m => m.id !== movie.id));
           }
-          // Automatically generate next movie
           handleGenerate();
         };
 
@@ -171,20 +169,28 @@
         const fetchMoviesFromTMDB = async (query = '') => {
           try {
             let url;
-            // UPGRADE: Increased search depth from 50 to 500 pages (Max allowed by TMDB)
-            // This grants access to approximately 10,000+ movies for "huge" variety.
             let pageToFetch = Math.floor(Math.random() * 500) + 1;
 
             if (query.trim().length > 0) {
               url = `${BASE_URL}/search/movie?query=${encodeURIComponent(query)}&include_adult=false&page=1`;
             } else {
               url = `${BASE_URL}/discover/movie?sort_by=popularity.desc&include_adult=false&page=${pageToFetch}&vote_count.gte=10`;
+              
               const genreIds = selectedGenres.map(g => GENRES[g]).join('|');
               if (genreIds) url += `&with_genres=${genreIds}`;
-              if (selectedLanguage !== 'All' && LANGUAGES[selectedLanguage]) {
-                url += `&with_original_language=${LANGUAGES[selectedLanguage]}`;
-                if (selectedLanguage === 'English') url += `&primary_release_date.gte=2000-01-01`;
+              
+              // UPDATED LANGUAGE LOGIC
+              const langCode = LANGUAGES[selectedLanguage];
+              if (langCode && langCode !== 'all') {
+                url += `&with_original_language=${langCode}`;
+                
+                // If English, force modern movies (post-2000)
+                if (selectedLanguage === 'English') {
+                   url += `&primary_release_date.gte=2000-01-01`;
+                }
               }
+              // If 'all' (International), we don't filter by language, but region=IN ensures popularity in India (often dubbed)
+              
               url += `&watch_region=IN`;
             }
 
@@ -201,13 +207,9 @@
 
             if (!data.results || data.results.length === 0) return null;
 
-            // SMART FILTER: Remove movies already in Watched List
-            // Note: In Search mode (query exists), we allow showing watched movies so you can find them.
-            // In Discover mode, we hide them.
             let validResults = data.results;
             if (query.trim().length === 0) {
                 validResults = data.results.filter(m => !watchedList.some(w => w.id === m.id));
-                // If all movies on this page are watched, we might return null and trigger a retry in handleGenerate (simplified here to just null)
                 if (validResults.length === 0) return null; 
             }
 
@@ -252,12 +254,11 @@
           setShowTrailer(false);
           const queryToUse = overrideQuery !== null ? overrideQuery : searchQuery;
           
-          // Retry logic handled simply by fetching new page in fetchMoviesFromTMDB
           const movie = await fetchMoviesFromTMDB(queryToUse);
           
           setTimeout(() => {
             if (movie) setCurrentMovie(movie);
-            else if (!queryToUse) handleGenerate(); // Auto-retry if filtered out all watched movies
+            else if (!queryToUse) handleGenerate(); 
             else alert("No movies found! Try a different search.");
             setIsAnimating(false);
           }, 800);
