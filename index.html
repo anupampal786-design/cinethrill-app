@@ -55,10 +55,7 @@
       const ArrowLeft = ({ className }) => <IconBase className={className}><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></IconBase>;
       const Search = ({ className }) => <IconBase className={className}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></IconBase>;
       const Youtube = ({ className }) => <IconBase className={className}><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></IconBase>;
-      
-      // RENAMED X to XIcon to prevent conflicts
       const XIcon = ({ className }) => <IconBase className={className}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></IconBase>;
-      
       const Download = ({ className }) => <IconBase className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></IconBase>;
 
       // --- CONFIGURATION ---
@@ -92,8 +89,12 @@
           } catch (e) { return []; }
         });
 
+        // Auto-refresh when filters change
         useEffect(() => {
           handleGenerate();
+        }, [selectedLanguage, selectedGenre]);
+
+        useEffect(() => {
           window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); setInstallPrompt(e); });
           if (window.matchMedia('(display-mode: standalone)').matches) setIsInstalled(true);
         }, []);
@@ -141,18 +142,39 @@
         const fetchMoviesFromTMDB = async (query = '') => {
           try {
             let url;
+            let pageToFetch = 1;
+
             if (query.trim().length > 0) {
+              // Search mode: Always Page 1
               url = `${BASE_URL}/search/movie?query=${encodeURIComponent(query)}&include_adult=false&page=1`;
             } else {
-              url = `${BASE_URL}/discover/movie?sort_by=vote_average.desc&vote_count.gte=50&include_adult=false&page=1`;
+              // Discover mode: Use POPULARITY to show trending/new content
+              // We also randomize pages 1-5 to keep it fresh
+              pageToFetch = Math.floor(Math.random() * 5) + 1;
+              
+              // NEW SORTING: Popularity Descending (Trending) + Rating > 6.0 (Good Quality)
+              url = `${BASE_URL}/discover/movie?sort_by=popularity.desc&vote_average.gte=6.0&vote_count.gte=10&include_adult=false&page=${pageToFetch}`;
+              
               if (selectedGenre !== 'All' && GENRES[selectedGenre]) url += `&with_genres=${GENRES[selectedGenre]}`;
               else url += `&with_genres=53,80`;
+              
               if (selectedLanguage !== 'All' && LANGUAGES[selectedLanguage]) url += `&with_original_language=${LANGUAGES[selectedLanguage]}`;
               url += `&watch_region=IN`;
             }
+
             const options = { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${API_TOKEN}` } };
-            const response = await fetch(url, options);
-            const data = await response.json();
+            
+            // First Attempt
+            let response = await fetch(url, options);
+            let data = await response.json();
+
+            // FALLBACK: If random page empty, try Page 1
+            if ((!data.results || data.results.length === 0) && pageToFetch > 1) {
+               url = url.replace(`page=${pageToFetch}`, 'page=1');
+               response = await fetch(url, options);
+               data = await response.json();
+            }
+
             if (!data.results || data.results.length === 0) return null;
 
             const rawMovie = query.trim().length > 0 ? data.results[0] : data.results[Math.floor(Math.random() * data.results.length)];
