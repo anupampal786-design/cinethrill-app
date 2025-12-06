@@ -189,12 +189,9 @@
             if (query.trim().length > 0) {
               url = `${BASE_URL}/search/movie?query=${encodeURIComponent(query)}&include_adult=false&page=1`;
             } else {
-              // 1. Scout
               const scoutResponse = await fetch(`${baseUrl}${filterParams}&page=1`, { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${API_TOKEN}` } });
               const scoutData = await scoutResponse.json();
-              // 2. Max Page logic
               const maxPages = Math.min(scoutData.total_pages || 1, 500);
-              // 3. Random Page
               const randomPage = Math.floor(Math.random() * maxPages) + 1;
               url = `${baseUrl}${filterParams}&page=${randomPage}`;
             }
@@ -223,16 +220,48 @@
             const providerRes = await fetch(`${BASE_URL}/movie/${rawMovie.id}/watch/providers`, options);
             const providerData = await providerRes.json();
             const providers = providerData.results?.IN || providerData.results?.US;
+            
+            // --- STRICT PLATFORM LOGIC ---
             let platformName = 'Check Online';
             let platformLink = `https://www.google.com/search?q=watch+${encodeURIComponent(rawMovie.title)}+movie`;
             
+            const TARGET_PLATFORMS = [
+                'Netflix', 'Amazon Prime Video', 'Disney+ Hotstar', 'Sony LIV', 'Zee5', 'JioCinema', 
+                'Hoichoi', 'MX Player', 'Voot', 'ALTBalaji', 'Apple TV Plus', 'Apple TV', 'Eros Now', 
+                'ShemarooMe', 'Addatimes', 'Lionsgate Play', 'Klikk', 'Niharika Originals'
+            ];
+
             if (providers?.flatrate && providers.flatrate.length > 0) {
-              platformName = providers.flatrate[0].provider_name;
-              if (platformName.toLowerCase().includes('netflix')) platformLink = `https://www.netflix.com/search?q=${encodeURIComponent(rawMovie.title)}`;
-              else if (platformName.toLowerCase().includes('hotstar')) platformLink = `https://www.hotstar.com/in/explore?q=${encodeURIComponent(rawMovie.title)}`;
-              else if (platformName.toLowerCase().includes('prime')) platformLink = `https://www.amazon.com/s?k=${encodeURIComponent(rawMovie.title)}`;
-              else if (platformName.toLowerCase().includes('hoichoi')) platformLink = `https://www.hoichoi.tv/search?q=${encodeURIComponent(rawMovie.title)}`;
-              else if (platformName.toLowerCase().includes('zee5')) platformLink = `https://www.zee5.com/search?q=${encodeURIComponent(rawMovie.title)}`;
+              // Try to find one of our target platforms
+              const foundProvider = providers.flatrate.find(p => 
+                  TARGET_PLATFORMS.some(target => p.provider_name.toLowerCase().includes(target.toLowerCase()))
+              );
+
+              if (foundProvider) {
+                  platformName = foundProvider.provider_name;
+                  const pLower = platformName.toLowerCase();
+                  const encodedTitle = encodeURIComponent(rawMovie.title);
+
+                  if (pLower.includes('netflix')) platformLink = `https://www.netflix.com/search?q=${encodedTitle}`;
+                  else if (pLower.includes('hotstar')) platformLink = `https://www.hotstar.com/in/explore?q=${encodedTitle}`;
+                  else if (pLower.includes('prime') || pLower.includes('amazon')) platformLink = `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodedTitle}`;
+                  else if (pLower.includes('hoichoi')) platformLink = `https://www.hoichoi.tv/search?q=${encodedTitle}`;
+                  else if (pLower.includes('zee5')) platformLink = `https://www.zee5.com/search?q=${encodedTitle}`;
+                  else if (pLower.includes('sonyliv')) platformLink = `https://www.sonyliv.com/search?query=${encodedTitle}`;
+                  else if (pLower.includes('jiocinema')) platformLink = `https://www.jiocinema.com/search/${encodedTitle}`;
+                  else if (pLower.includes('mx player')) platformLink = `https://www.mxplayer.in/search?q=${encodedTitle}`;
+                  else if (pLower.includes('voot')) platformLink = `https://www.voot.com/search/${encodedTitle}`;
+                  else if (pLower.includes('altbalaji')) platformLink = `https://www.altbalaji.com/search/${encodedTitle}`;
+                  else if (pLower.includes('apple')) platformLink = `https://tv.apple.com/search?term=${encodedTitle}`;
+                  else if (pLower.includes('eros')) platformLink = `https://erosnow.com/search?q=${encodedTitle}`;
+                  else if (pLower.includes('shemaroo')) platformLink = `https://www.shemaroome.com/search?q=${encodedTitle}`;
+                  else if (pLower.includes('addatimes')) platformLink = `https://www.addatimes.com/search?q=${encodedTitle}`;
+                  else if (pLower.includes('lionsgate')) platformLink = `https://lionsgateplay.com/search?q=${encodedTitle}`;
+                  else if (pLower.includes('klikk')) platformLink = `https://klikk.tv/search?q=${encodedTitle}`;
+              } else {
+                  // If available on a platform NOT in our list, show first available but default to generic search link if needed
+                  platformName = providers.flatrate[0].provider_name;
+              }
             }
 
             return {
@@ -273,11 +302,26 @@
         const getPlatformColor = (platform) => {
           if (!platform) return 'bg-gray-700 hover:bg-gray-600 text-white';
           const p = platform.toLowerCase();
+          
+          // Custom Colors for Requested Platforms
           if (p.includes('netflix')) return 'bg-red-600 hover:bg-red-700 text-white';
-          if (p.includes('prime') || p.includes('amazon')) return 'bg-blue-500 hover:bg-blue-600 text-white';
+          if (p.includes('prime') || p.includes('amazon')) return 'bg-[#00A8E1] hover:bg-[#008dbd] text-white';
           if (p.includes('hotstar')) return 'bg-[#133063] hover:bg-[#1a4082] text-white';
+          if (p.includes('sonyliv')) return 'bg-[#f8991d] hover:bg-[#d68318] text-white';
+          if (p.includes('zee5')) return 'bg-[#8230c6] hover:bg-[#6a26a3] text-white';
+          if (p.includes('jiocinema')) return 'bg-[#d63486] hover:bg-[#b02a6e] text-white';
           if (p.includes('hoichoi')) return 'bg-orange-500 hover:bg-orange-600 text-white';
-          if (p.includes('zee5')) return 'bg-purple-600 hover:bg-purple-700 text-white';
+          if (p.includes('mx player')) return 'bg-[#0056D2] hover:bg-[#0042a3] text-white';
+          if (p.includes('voot')) return 'bg-[#52246d] hover:bg-[#3e1b52] text-white';
+          if (p.includes('altbalaji')) return 'bg-gray-800 hover:bg-gray-900 text-white border border-white/20';
+          if (p.includes('apple')) return 'bg-neutral-900 hover:bg-black text-white border border-white/20';
+          if (p.includes('eros')) return 'bg-[#00A651] hover:bg-[#008741] text-white';
+          if (p.includes('shemaroo')) return 'bg-[#d9480f] hover:bg-[#bf3d0b] text-white';
+          if (p.includes('addatimes')) return 'bg-[#ffc107] hover:bg-[#e0a800] text-black';
+          if (p.includes('lionsgate')) return 'bg-neutral-800 hover:bg-neutral-900 text-white border border-yellow-500/50';
+          if (p.includes('klikk')) return 'bg-red-500 hover:bg-red-600 text-white';
+          if (p.includes('niharika')) return 'bg-pink-600 hover:bg-pink-700 text-white';
+          
           return 'bg-gray-700 hover:bg-gray-600 text-white';
         };
 
